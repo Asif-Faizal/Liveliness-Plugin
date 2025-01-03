@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.innovitegra.livelines_detection">
+
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <application>
+        <activity
+            android:name=".CameraActivity"
+            android:theme="@style/CameraActivityTheme">
+        </activity>
+    </application>
+</manifest>
