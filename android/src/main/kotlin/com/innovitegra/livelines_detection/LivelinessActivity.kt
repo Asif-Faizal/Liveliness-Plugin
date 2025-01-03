@@ -12,6 +12,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.widget.ImageView
+import android.widget.RelativeLayout
+import android.view.ViewGroup
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
 import androidx.camera.core.ImageProxy
@@ -28,13 +31,14 @@ import java.nio.ByteBuffer
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-class CameraActivity : AppCompatActivity() {
+class LivelinessActivity : AppCompatActivity() {
 
     private lateinit var cameraExecutor: ExecutorService
     private val cameraPermissionRequestCode = 1001
     private val audioPermissionRequestCode = 1002
 
     private lateinit var previewView: PreviewView
+    private lateinit var overlayImageView: ImageView
     private lateinit var faceDetector: FaceDetector
     private val handler =
             Handler(Looper.getMainLooper()) // Handler to control image emission interval
@@ -45,7 +49,17 @@ class CameraActivity : AppCompatActivity() {
 
         // Initialize PreviewView programmatically
         previewView = PreviewView(this)
-        setContentView(previewView)
+        overlayImageView = ImageView(this).apply {
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            setScaleType(ImageView.ScaleType.FIT_XY)
+        }
+
+        // Set up a parent layout (e.g., RelativeLayout or FrameLayout) to contain both views
+        val parentLayout = RelativeLayout(this).apply {
+            addView(previewView)
+            addView(overlayImageView)
+        }
+        setContentView(parentLayout)
 
         // Set up ML Kit Face Detector
         val options =
@@ -124,7 +138,7 @@ class CameraActivity : AppCompatActivity() {
                     imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
                         // Check the time passed since the last image was processed
                         val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastProcessedTime >= 100) { // Process every 100ms
+                        if (currentTime - lastProcessedTime >= 500) { // Process every 100ms
                             processImage(imageProxy)
                             lastProcessedTime = currentTime
                         } else {
@@ -150,41 +164,53 @@ class CameraActivity : AppCompatActivity() {
     private fun processImage(imageProxy: ImageProxy) {
         val mediaImage = imageProxy.image
         if (mediaImage != null) {
-            // Convert the media image to a bitmap (it can be null)
-            val bitmap = BitmapUtils.getBitmap(mediaImage)
-
-            // Rotate the bitmap if needed, handle null safely
-            val rotatedBitmap = rotateBitmapIfNeeded(bitmap, imageProxy)
-
+            // Convert the media image to a bitmap
+            val bitmap = CameraBitmapUtils.getBitmap(mediaImage)
+    
+            // Rotate the bitmap by 90 degrees
+            val rotatedBitmap = rotateBitmap(bitmap, 270f,flipHorizontally = true)
+    
             // Handle the rotated bitmap (if it's non-null)
             rotatedBitmap?.let {
-                detectFaces(it) // Only call detectFaces if rotatedBitmap is non-null
-            }
-                    ?: Log.e("CameraActivity", "Failed to convert image to bitmap or rotate image")
+                detectFaces(it) // Call detectFaces with the rotated bitmap
+            } ?: Log.e("CameraActivity", "Failed to convert or rotate image")
         } else {
             Log.e("CameraActivity", "Media image is null")
         }
-
+    
         imageProxy.close() // Always close the image proxy
     }
+    
+    private fun rotateBitmap(bitmap: Bitmap?, degrees: Float, flipHorizontally: Boolean = false): Bitmap? {
+        return bitmap?.let {
+            val matrix = Matrix()
+            matrix.postRotate(degrees)
+            if (flipHorizontally) {
+                matrix.postScale(-1f, 1f, (it.width / 2).toFloat(), (it.height / 2).toFloat()) // Flip horizontally
+            }
+            Bitmap.createBitmap(it, 0, 0, it.width, it.height, matrix, true)
+        }
+    }
+    
+    
 
     private fun detectFaces(bitmap: Bitmap?) {
         bitmap?.let {
             val image = com.google.mlkit.vision.common.InputImage.fromBitmap(it, 0)
-
+    
             faceDetector
                     .process(image)
                     .addOnSuccessListener { faces ->
                         Log.d("CameraActivity", "Faces detected: ${faces.size}")
                         if (faces.isEmpty()) {
                             Log.d("CameraActivity", "No faces detected.")
+                            // Clear the bounding box when no face is detected
+                            clearBoundingBox()
+                        } else {
+                            for (face in faces) {
+                                drawBoundingBox(face)
+                            }
                         }
-                        for (face in faces) {
-                            drawBoundingBox(face)
-                        }
-                    }
-                    .addOnFailureListener { e ->
-                        Log.e("CameraActivity", "Face detection failed", e)
                     }
                     .addOnFailureListener { e ->
                         Log.e("CameraActivity", "Face detection failed", e)
@@ -192,50 +218,41 @@ class CameraActivity : AppCompatActivity() {
         }
                 ?: Log.e("CameraActivity", "Bitmap is null, cannot detect faces")
     }
+    
 
     private fun drawBoundingBox(face: Face) {
-        // Ensure previewView.bitmap is non-null
-        previewView.bitmap?.let { bitmap ->
-            val canvas = Canvas(bitmap)
-            val paint =
-                    Paint().apply {
-                        color = android.graphics.Color.RED
-                        strokeWidth = 8f
-                        style = Paint.Style.STROKE
-                    }
-
-            val bounds = face.boundingBox
-            canvas.drawRect(bounds, paint)
-
-            previewView.invalidate() // Refresh the PreviewView to show bounding box
+        // Check if overlayImageView is initialized
+        if (!::overlayImageView.isInitialized) {
+            Log.e("CameraActivity", "overlayImageView not initialized")
+            return
         }
-                ?: Log.e("CameraActivity", "Bitmap is null, cannot draw bounding box")
+
+        // Convert the face bounding box to a Bitmap
+        val bitmap = Bitmap.createBitmap(previewView.width, previewView.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint().apply {
+            color = android.graphics.Color.RED
+            strokeWidth = 8f
+            style = Paint.Style.STROKE
+        }
+
+        // Draw the bounding box around the face
+        val bounds = face.boundingBox
+        canvas.drawRect(bounds, paint)
+
+        // Set the bitmap with bounding box to the overlay ImageView
+        overlayImageView.setImageBitmap(bitmap) // Display updated bitmap with bounding box
+    } 
+
+    private fun clearBoundingBox() {
+        // Clear the overlay ImageView by setting a blank bitmap
+        val emptyBitmap = Bitmap.createBitmap(previewView.width, previewView.height, Bitmap.Config.ARGB_8888)
+        overlayImageView.setImageBitmap(emptyBitmap)
     }
+    
 }
 
-fun rotateBitmapIfNeeded(bitmap: Bitmap?, imageProxy: ImageProxy): Bitmap? {
-    if (bitmap == null) return null // Return null if the bitmap is null
-
-    // Create a matrix for rotating the image
-    val rotationMatrix = Matrix()
-
-    // Get the rotation degrees from the image proxy
-    val rotationDegree =
-            when (imageProxy.imageInfo.rotationDegrees) {
-                90 -> 90
-                180 -> 180
-                270 -> 270
-                else -> 0 // No rotation (0 degrees)
-            }
-
-    // Apply the rotation to the matrix
-    rotationMatrix.postRotate(rotationDegree.toFloat())
-
-    // Create a rotated bitmap from the original bitmap using the matrix
-    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, rotationMatrix, true)
-}
-
-object BitmapUtils {
+object CameraBitmapUtils {
     fun getBitmap(image: Image): Bitmap? {
         val plane = image.planes[0]
         val buffer: ByteBuffer = plane.buffer

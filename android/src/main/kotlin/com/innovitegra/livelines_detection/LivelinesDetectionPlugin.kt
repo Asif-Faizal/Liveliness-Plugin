@@ -25,7 +25,7 @@ class LivelinesDetectionPlugin: FlutterPlugin, MethodCallHandler {
         result.success("Android ${android.os.Build.VERSION.RELEASE}")
       }
       "launchCamera" -> {
-        val intent = Intent(context, CameraActivity::class.java)
+        val intent = Intent(context, LivelinessActivity::class.java)
         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
         context.startActivity(intent)
         result.success(null)

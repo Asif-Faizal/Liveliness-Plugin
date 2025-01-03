@@ -15,7 +15,7 @@
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
-    <style name="CameraActivityTheme" parent="Theme.AppCompat.Light.NoActionBar">
+    <style name="LivelinessActivityTheme" parent="Theme.AppCompat.Light.NoActionBar">
         <!-- Customize the theme for CameraActivity if needed -->
     </style>
 </resources>
