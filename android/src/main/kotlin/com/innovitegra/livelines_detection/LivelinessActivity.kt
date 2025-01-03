@@ -226,7 +226,7 @@ class LivelinessActivity : AppCompatActivity() {
             Log.e("CameraActivity", "overlayImageView not initialized")
             return
         }
-
+    
         // Convert the face bounding box to a Bitmap
         val bitmap = Bitmap.createBitmap(previewView.width, previewView.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -235,14 +235,27 @@ class LivelinessActivity : AppCompatActivity() {
             strokeWidth = 8f
             style = Paint.Style.STROKE
         }
-
-        // Draw the bounding box around the face
+    
+        // Get the bounding box from the detected face
         val bounds = face.boundingBox
-        canvas.drawRect(bounds, paint)
-
+    
+        // Scale the bounding box coordinates to match the preview size
+        val scaleX = previewView.width.toFloat() / previewView.height.toFloat()
+        val scaleY = previewView.height.toFloat() / previewView.width.toFloat()
+        
+        val scaledLeft = bounds.left * scaleX + 100f
+        val scaledTop = bounds.top * scaleY - 100f
+        val scaledRight = bounds.right * scaleX + 400f
+        val scaledBottom = bounds.bottom * scaleY
+    
+        // Draw the bounding box around the face
+        canvas.drawRect(scaledLeft, scaledTop, scaledRight, scaledBottom, paint)
+    
         // Set the bitmap with bounding box to the overlay ImageView
         overlayImageView.setImageBitmap(bitmap) // Display updated bitmap with bounding box
-    } 
+    }
+    
+    
 
     private fun clearBoundingBox() {
         // Clear the overlay ImageView by setting a blank bitmap
