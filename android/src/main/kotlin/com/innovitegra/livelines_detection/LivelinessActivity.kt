@@ -12,9 +12,10 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.RelativeLayout
-import android.view.ViewGroup
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
 import androidx.camera.core.ImageProxy
@@ -39,26 +40,55 @@ class LivelinessActivity : AppCompatActivity() {
 
     private lateinit var previewView: PreviewView
     private lateinit var overlayImageView: ImageView
+    private lateinit var statusTextView: TextView
     private lateinit var faceDetector: FaceDetector
     private val handler =
             Handler(Looper.getMainLooper()) // Handler to control image emission interval
     private var lastProcessedTime: Long = 0
+    private val headMovementTasks = mutableMapOf(
+        "Head moved right" to false,
+        "Head moved left" to false
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Initialize PreviewView programmatically
         previewView = PreviewView(this)
-        overlayImageView = ImageView(this).apply {
-            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            setScaleType(ImageView.ScaleType.FIT_XY)
-        }
+        overlayImageView =
+                ImageView(this).apply {
+                    layoutParams =
+                            ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                    setScaleType(ImageView.ScaleType.FIT_XY)
+                }
 
+        statusTextView =
+                TextView(this).apply {
+                    layoutParams =
+                            RelativeLayout.LayoutParams(
+                                            RelativeLayout.LayoutParams.WRAP_CONTENT,
+                                            RelativeLayout.LayoutParams.WRAP_CONTENT
+                                    )
+                                    .apply {
+                                        addRule(RelativeLayout.ALIGN_PARENT_BOTTOM)
+                                        addRule(RelativeLayout.CENTER_HORIZONTAL)
+                                        setMargins(16, 16, 16, 16)
+                                    }
+                    text = "Initializing..."
+                    textSize = 18f
+                    setTextColor(android.graphics.Color.WHITE)
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                }
         // Set up a parent layout (e.g., RelativeLayout or FrameLayout) to contain both views
-        val parentLayout = RelativeLayout(this).apply {
-            addView(previewView)
-            addView(overlayImageView)
-        }
+        val parentLayout =
+                RelativeLayout(this).apply {
+                    addView(previewView)
+                    addView(overlayImageView)
+                    addView(statusTextView)
+                }
         setContentView(parentLayout)
 
         // Set up ML Kit Face Detector
@@ -75,7 +105,7 @@ class LivelinessActivity : AppCompatActivity() {
         cameraExecutor = Executors.newSingleThreadExecutor()
 
         // Initialize camera
-        initializeCamera(previewView)
+        requestPermissions()
     }
 
     override fun onDestroy() {
@@ -84,35 +114,20 @@ class LivelinessActivity : AppCompatActivity() {
     }
 
     // Handle permission request results
-    override fun onRequestPermissionsResult(
-            requestCode: Int,
-            permissions: Array<out String>,
-            grantResults: IntArray
-    ) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-
+    
         when (requestCode) {
             cameraPermissionRequestCode -> {
-                if (grantResults.isNotEmpty() &&
-                                grantResults[0] == PackageManager.PERMISSION_GRANTED
-                ) {
-                    // Camera permission granted, initialize camera
-                    initializeCamera(previewView)
+                if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                    initializeCamera(previewView) // Initialize camera if permissions are granted
                 } else {
-                    // Permission denied, handle accordingly
-                }
-            }
-            audioPermissionRequestCode -> {
-                if (grantResults.isNotEmpty() &&
-                                grantResults[0] == PackageManager.PERMISSION_GRANTED
-                ) {
-                    // Audio permission granted, initialize audio recording (if needed)
-                } else {
-                    // Permission denied, handle accordingly
+                    statusTextView.text = "Permissions denied. Cannot proceed."
                 }
             }
         }
     }
+    
 
     private fun initializeCamera(previewView: PreviewView) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
@@ -161,62 +176,112 @@ class LivelinessActivity : AppCompatActivity() {
         )
     }
 
+    private fun requestPermissions() {
+        val cameraPermission = android.Manifest.permission.CAMERA
+        val audioPermission = android.Manifest.permission.RECORD_AUDIO
+    
+        // Check if permissions are already granted
+        val cameraGranted = ContextCompat.checkSelfPermission(this, cameraPermission) == PackageManager.PERMISSION_GRANTED
+        val audioGranted = ContextCompat.checkSelfPermission(this, audioPermission) == PackageManager.PERMISSION_GRANTED
+    
+        // Request permissions if not granted
+        val permissionsToRequest = mutableListOf<String>()
+        if (!cameraGranted) permissionsToRequest.add(cameraPermission)
+        if (!audioGranted) permissionsToRequest.add(audioPermission)
+    
+        if (permissionsToRequest.isNotEmpty()) {
+            requestPermissions(permissionsToRequest.toTypedArray(), cameraPermissionRequestCode)
+        } else {
+            initializeCamera(previewView) // Initialize camera if permissions are already granted
+        }
+    }
+    
+
     private fun processImage(imageProxy: ImageProxy) {
         val mediaImage = imageProxy.image
         if (mediaImage != null) {
             // Convert the media image to a bitmap
             val bitmap = CameraBitmapUtils.getBitmap(mediaImage)
-    
+
             // Rotate the bitmap by 90 degrees
-            val rotatedBitmap = rotateBitmap(bitmap, 270f,flipHorizontally = true)
-    
+            val rotatedBitmap = rotateBitmap(bitmap, 270f, flipHorizontally = true)
+
             // Handle the rotated bitmap (if it's non-null)
             rotatedBitmap?.let {
                 detectFaces(it) // Call detectFaces with the rotated bitmap
-            } ?: Log.e("CameraActivity", "Failed to convert or rotate image")
+            }
+                    ?: Log.e("CameraActivity", "Failed to convert or rotate image")
         } else {
             Log.e("CameraActivity", "Media image is null")
         }
-    
+
         imageProxy.close() // Always close the image proxy
     }
-    
-    private fun rotateBitmap(bitmap: Bitmap?, degrees: Float, flipHorizontally: Boolean = false): Bitmap? {
+
+    private fun rotateBitmap(
+            bitmap: Bitmap?,
+            degrees: Float,
+            flipHorizontally: Boolean = false
+    ): Bitmap? {
         return bitmap?.let {
             val matrix = Matrix()
             matrix.postRotate(degrees)
             if (flipHorizontally) {
-                matrix.postScale(-1f, 1f, (it.width / 2).toFloat(), (it.height / 2).toFloat()) // Flip horizontally
+                matrix.postScale(
+                        -1f,
+                        1f,
+                        (it.width / 2).toFloat(),
+                        (it.height / 2).toFloat()
+                ) // Flip horizontally
             }
             Bitmap.createBitmap(it, 0, 0, it.width, it.height, matrix, true)
         }
     }
-    
-    
 
     private fun detectFaces(bitmap: Bitmap?) {
         bitmap?.let {
             val image = com.google.mlkit.vision.common.InputImage.fromBitmap(it, 0)
     
             faceDetector
-                    .process(image)
-                    .addOnSuccessListener { faces ->
-                        Log.d("CameraActivity", "Faces detected: ${faces.size}")
-                        if (faces.isEmpty()) {
-                            Log.d("CameraActivity", "No faces detected.")
-                            // Clear the bounding box when no face is detected
-                            clearBoundingBox()
-                        } else {
-                            for (face in faces) {
-                                drawBoundingBox(face)
+                .process(image)
+                .addOnSuccessListener { faces ->
+                    Log.d("CameraActivity", "Faces detected: ${faces.size}")
+                    if (faces.isEmpty()) {
+                        Log.d("CameraActivity", "No faces detected.")
+                        clearBoundingBox()
+                    } else {
+                        for (face in faces) {
+                            drawBoundingBox(face)
+    
+                            // Detect head movement and update tasks
+                            val headEulerAngleY = face.headEulerAngleY
+                            when {
+                                headEulerAngleY > 10 && !headMovementTasks["Head moved right"]!! -> {
+                                    headMovementTasks["Head moved right"] = true
+                                    updateUIMessage("Task completed: Head moved right. Please move your head to the left.")
+                                }
+                                headEulerAngleY < -10 && headMovementTasks["Head moved right"] == true && !headMovementTasks["Head moved left"]!! -> {
+                                    headMovementTasks["Head moved left"] = true
+                                    updateUIMessage("Task completed: Head moved left. All tasks completed!")
+                                }
+                                else -> {
+                                    updateUIMessage(
+                                        if (!headMovementTasks["Head moved right"]!!)
+                                            "Please move your head to the right."
+                                        else if (!headMovementTasks["Head moved left"]!!)
+                                            "Please move your head to the left."
+                                        else
+                                            "All tasks completed!"
+                                    )
+                                }
                             }
                         }
                     }
-                    .addOnFailureListener { e ->
-                        Log.e("CameraActivity", "Face detection failed", e)
-                    }
-        }
-                ?: Log.e("CameraActivity", "Bitmap is null, cannot detect faces")
+                }
+                .addOnFailureListener { e ->
+                    Log.e("CameraActivity", "Face detection failed", e)
+                }
+        } ?: Log.e("CameraActivity", "Bitmap is null, cannot detect faces")
     }
     
 
@@ -226,43 +291,48 @@ class LivelinessActivity : AppCompatActivity() {
             Log.e("CameraActivity", "overlayImageView not initialized")
             return
         }
-    
+
         // Convert the face bounding box to a Bitmap
-        val bitmap = Bitmap.createBitmap(previewView.width, previewView.height, Bitmap.Config.ARGB_8888)
+        val bitmap =
+                Bitmap.createBitmap(previewView.width, previewView.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        val paint = Paint().apply {
-            color = android.graphics.Color.RED
-            strokeWidth = 8f
-            style = Paint.Style.STROKE
-        }
-    
+        val paint =
+                Paint().apply {
+                    color = android.graphics.Color.RED
+                    strokeWidth = 8f
+                    style = Paint.Style.STROKE
+                }
+
         // Get the bounding box from the detected face
         val bounds = face.boundingBox
-    
+
         // Scale the bounding box coordinates to match the preview size
         val scaleX = previewView.width.toFloat() / previewView.height.toFloat()
         val scaleY = previewView.height.toFloat() / previewView.width.toFloat()
-        
+
         val scaledLeft = bounds.left * scaleX + 100f
         val scaledTop = bounds.top * scaleY - 100f
         val scaledRight = bounds.right * scaleX + 400f
         val scaledBottom = bounds.bottom * scaleY
-    
+
         // Draw the bounding box around the face
         canvas.drawRect(scaledLeft, scaledTop, scaledRight, scaledBottom, paint)
-    
+
         // Set the bitmap with bounding box to the overlay ImageView
         overlayImageView.setImageBitmap(bitmap) // Display updated bitmap with bounding box
     }
-    
-    
 
     private fun clearBoundingBox() {
         // Clear the overlay ImageView by setting a blank bitmap
-        val emptyBitmap = Bitmap.createBitmap(previewView.width, previewView.height, Bitmap.Config.ARGB_8888)
+        val emptyBitmap =
+                Bitmap.createBitmap(previewView.width, previewView.height, Bitmap.Config.ARGB_8888)
         overlayImageView.setImageBitmap(emptyBitmap)
     }
-    
+    private fun updateUIMessage(message: String) {
+        runOnUiThread {
+            statusTextView.text = message
+        }
+    }
 }
 
 object CameraBitmapUtils {
