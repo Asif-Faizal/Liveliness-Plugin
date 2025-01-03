@@ -67,6 +67,9 @@ android {
         // AppCompat dependency
         implementation("androidx.appcompat:appcompat:1.6.1")
 
+        // ML Kit Face Detection dependency
+        implementation 'com.google.mlkit:face-detection:16.0.0'
+
         // Test dependencies
         testImplementation("org.jetbrains.kotlin:kotlin-test")
         testImplementation("org.mockito:mockito-core:5.0.0")
